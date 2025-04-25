@@ -11,31 +11,31 @@ const bigquery = new BigQuery({
   projectId: process.env.BQ_PROJECT_ID,
 });
 
-async function fetchContacts() {
-  const { data } = await hubspot.get('', {
-    params: {
-      limit: 100,
-      properties: ['firstname', 'email', 'lifecyclestage', 'createdate', 'hs_lastmodifieddate']
-    }
+// 🔍 Step 1: Get all property names from HubSpot
+async function getAllPropertyNames() {
+  const res = await axios.get('https://api.hubapi.com/crm/v3/properties/contacts', {
+    headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
   });
 
-  return data.results.map(contact => ({
-    id: contact.id,
-    firstname: contact.properties.firstname || null,
-    email: contact.properties.email || null,
-    lifecycle: contact.properties.lifecyclestage || null,
-    createdate: new Date(contact.properties.createdate),
-    hs_lastmodifieddate: new Date(contact.properties.hs_lastmodifieddate)
-  }));
+  return res.data.results.map(p => p.name);
 }
 
-async function loadToBigQuery(rows) {
-  const table = bigquery.dataset(process.env.BQ_DATASET).table(process.env.BQ_TABLE);
-  await table.insert(rows, { ignoreUnknownValues: true, skipInvalidRows: true });
-  console.log(`✅ Uploaded ${rows.length} contacts`);
-}
+// 📥 Step 2: Fetch all contacts using pagination
+async function fetchContacts() {
+  console.log('📡 Fetching contacts from HubSpot...');
+  let allContacts = [];
+  let after = undefined;
+  const properties = await getAllPropertyNames();
 
-(async () => {
-  const rows = await fetchContacts();
-  await loadToBigQuery(rows);
-})();
+  do {
+    const { data } = await hubspot.get('', {
+      params: {
+        limit: 100,
+        after: after,
+        properties: properties
+      }
+    });
+
+    const mapped = data.results.map(contact => ({
+      id: contact.id,
+      ...contact.properties  // spreads all properties
