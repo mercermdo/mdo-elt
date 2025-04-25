@@ -2,3 +2,4 @@ node_modules
 .env
 gcp-key.json
 lastSync.json
+lastSync.json
