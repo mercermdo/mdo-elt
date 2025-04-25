@@ -43,8 +43,8 @@ jobs:
         username: ${{ secrets.EMAIL_USERNAME }}
         password: ${{ secrets.EMAIL_PASSWORD }}
         subject: 🚨 HubSpot ETL Failed
-        to: your@email.com
-        from: HubSpot ETL Bot <your@email.com>
+        to: mercer.west@mdoholdings.com
+        from: HubSpot ETL Bot <mercer.west@mdoholdings.com>
         body: |
           Your hourly HubSpot → BigQuery ETL has failed. 
           Please check the latest run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
