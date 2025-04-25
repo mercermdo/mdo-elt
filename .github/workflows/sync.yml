@@ -1,0 +1,50 @@
+name: Hourly HubSpot ETL to BigQuery
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Every hour, on the hour
+  workflow_dispatch:      # Optional: allows manual trigger
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: ⬇️ Checkout code
+      uses: actions/checkout@v3
+
+    - name: 🟢 Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: 18
+
+    - name: 📦 Install dependencies
+      run: npm install
+
+    - name: 🔐 Authenticate with Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_KEY }}
+
+    - name: 🧠 Run ETL script
+      run: node index.js
+      env:
+        HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+        BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+        BQ_DATASET: Thrive_HubSpot
+        BQ_TABLE: contacts
+
+    - name: 📧 Notify on failure
+      if: failure()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: 🚨 HubSpot ETL Failed
+        to: your@email.com
+        from: HubSpot ETL Bot <your@email.com>
+        body: |
+          Your hourly HubSpot → BigQuery ETL has failed. 
+          Please check the latest run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
