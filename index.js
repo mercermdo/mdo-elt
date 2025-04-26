@@ -125,22 +125,29 @@ async function loadToBigQuery(rows) {
   const dataset = bigquery.dataset(process.env.BQ_DATASET);
   const table = dataset.table(process.env.BQ_TABLE);
 
-  const [exists] = await table.exists();
-  if (!exists) {
-    console.log('🚧 Table does not exist. Creating it dynamically...');
-    const firstRow = rows[0];
-    const schema = Object.keys(firstRow).map(key => ({
-      name: key.replace(/[^\w]/g, '_'),  // sanitize property names
-      type: 'STRING'
-    }));
-
-    await dataset.createTable(process.env.BQ_TABLE, { schema });
-    console.log('✅ Created table with dynamic schema.');
+  try {
+    await table.get(); // Check if table exists
+  } catch (err) {
+    if (err.code === 404) {
+      console.log('🚧 Table does not exist. Creating it dynamically...');
+      const schema = Object.keys(rows[0]).map(key => ({
+        name: key,
+        type: 'STRING', // Simplification: store all as string for now
+        mode: 'NULLABLE'
+      }));
+      await dataset.createTable(process.env.BQ_TABLE, { schema });
+      console.log('✅ Created table with dynamic schema.');
+      await new Promise(resolve => setTimeout(resolve, 2000)); // <- 🕑 Add a 2-second wait
+    } else {
+      throw err; // Unexpected error
+    }
   }
 
+  // ✅ Now table is ready
   await table.insert(rows, { ignoreUnknownValues: true, skipInvalidRows: true });
   console.log(`🎉 Uploaded ${rows.length} contacts to BigQuery`);
 }
+
 
 // 🚀 Main ETL runner
 (async () => {
