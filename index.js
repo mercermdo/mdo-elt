@@ -35,19 +35,28 @@ async function getLastSyncTimestamp() {
     let ts = rows[0].last_sync_timestamp;
 
     if (typeof ts === 'string') {
-      // Clean the format manually
+      // Fix format: replace space with T and UTC with Z
       ts = ts.replace(' ', 'T').replace(' UTC', 'Z');
     }
 
     const parsedDate = new Date(ts);
 
     if (!isNaN(parsedDate)) {
+      console.log(`✅ Parsed last sync timestamp: ${parsedDate.toISOString()}`);
       return parsedDate.getTime();
+    } else {
+      console.warn('⚠️ Could not parse last sync timestamp, using fallback.');
     }
+  } else {
+    console.warn('⚠️ No last sync timestamp found, using fallback.');
   }
 
-  return null;
+  // Fallback: 30 days ago
+  const fallback = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  console.log(`✅ Fallback last sync timestamp: ${fallback.toISOString()}`);
+  return fallback.getTime();
 }
+
 
 
 
