@@ -8,6 +8,11 @@ on:
 jobs:
   run-etl:
     runs-on: ubuntu-latest
+    env:
+      HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+      BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+      BQ_DATASET:    ${{ secrets.BQ_DATASET }}
+      BQ_TABLE:      ${{ secrets.BQ_TABLE }}
 
     steps:
     - name: ⬇️ Checkout code
