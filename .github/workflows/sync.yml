@@ -32,7 +32,7 @@ jobs:
         HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
         BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
         BQ_DATASET: Thrive_HubSpot
-        BQ_TABLE: contacts
+        BQ_TABLE: Contacts
 
     - name: 📧 Notify on failure
       if: failure()
