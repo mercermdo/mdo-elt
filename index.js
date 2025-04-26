@@ -68,32 +68,53 @@ async function saveLastSync(ts) {
 
 /* ─────────────────────────────────────────────── contact fetch & load */
 
-async function fetchContacts(properties, since) {
-  const propNames = properties.map(p => p.name);
-  const chunks    = [];
-  while (propNames.length) chunks.push(propNames.splice(0,100)); // HubSpot limit
+async function fetchContacts(allProps) {
+  console.log('📡 Fetching contacts from HubSpot…');
 
-  let after = undefined, all = [];
+  // HubSpot allows max-100 properties per call
+  const propChunks = [];
+  for (let i = 0; i < allProps.length; i += 100) {
+    propChunks.push(allProps.slice(i, i + 100).map(p => p.name));
+  }
+
+  let after = undefined;
+  const lastSync = await getLastSyncTimestamp();
+  const now      = Date.now();
+  const contacts = {};
+
   do {
-    for (const props of chunks) {
+    for (const props of propChunks) {
       const params = {
-        limit      : 100,
+        limit:      100,
         after,
-        properties : props
+        properties: props
       };
-      if (since) {
+
+      if (lastSync) {
         params.filterGroups = [{
-          filters:[{ propertyName:'hs_lastmodifieddate', operator:'GT', value:String(since)}]
+          filters: [{
+            propertyName: 'hs_lastmodifieddate',
+            operator:     'GT',
+            value:        lastSync.toString()
+          }]
         }];
       }
-      const {data} = await hubspot.get('objects/contacts', {params});
-      all = all.concat(
-        data.results.map(c => ({ id:c.id, ...c.properties }))
-      );
-      after = data.paging?.next?.after;
+
+      const { data } = await hubspot.get('', { params });
+
+      data.results.forEach(c => {
+        // Merge chunks for the same contact ID
+        contacts[c.id] = { id: c.id, ...(contacts[c.id] || {}), ...c.properties };
+      });
+
+      // use paging info only from the first chunk
+      if (!after) after = data.paging?.next?.after;
     }
   } while (after);
-  return all;
+
+  console.log(`✅ Finished fetching ${Object.keys(contacts).length} contacts`);
+  await saveLastSyncTimestamp(now);
+  return Object.values(contacts);
 }
 
 async function ensureTable(schemaFields) {
