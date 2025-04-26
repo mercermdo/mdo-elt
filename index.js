@@ -34,28 +34,27 @@ async function getLastSyncTimestamp() {
   if (rows.length > 0 && rows[0].last_sync_timestamp) {
     let ts = rows[0].last_sync_timestamp;
 
-    if (typeof ts === 'string') {
-      // Fix format manually
+    if (ts instanceof Date) {
+      console.log(`✅ BigQuery returned a Date object: ${ts.toISOString()}`);
+      return ts.getTime();
+    } else if (typeof ts === 'string') {
+      // Fix common format problems if needed
       ts = ts.replace(' ', 'T').replace(' UTC', 'Z');
+      const parsedDate = new Date(ts);
+      if (!isNaN(parsedDate)) {
+        console.log(`✅ Parsed last sync timestamp from string: ${parsedDate.toISOString()}`);
+        return parsedDate.getTime();
+      }
     }
-
-    const parsedDate = new Date(ts);
-
-    if (!isNaN(parsedDate)) {
-      console.log(`✅ Parsed last sync timestamp: ${parsedDate.toISOString()}`);
-      return parsedDate.getTime();
-    } else {
-      console.warn('⚠️ Could not parse last sync timestamp, using fallback.');
-    }
-  } else {
-    console.warn('⚠️ No last sync timestamp found, using fallback.');
   }
 
+  console.warn('⚠️ Could not parse last sync timestamp, using fallback.');
   // Fallback: 30 days ago
   const fallback = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   console.log(`✅ Fallback last sync timestamp: ${fallback.toISOString()}`);
   return fallback.getTime();
 }
+
 
 
 
