@@ -71,9 +71,9 @@ async function fetchContacts() {
   console.log('📡 Fetching contacts from HubSpot...');
   let allContacts = [];
   let after = undefined;
-  const properties = await getAllPropertyNames(); // ✅ Fetch property names
   const lastSync = await getLastSyncTimestamp();
   const now = Date.now();
+  const properties = await getAllPropertyNames();  // ✅ fetch all property names!
 
   console.log(`Last sync was at: ${lastSync ? new Date(parseInt(lastSync)).toISOString() : 'Never (fetching all)'}`);
 
@@ -81,7 +81,7 @@ async function fetchContacts() {
     const params = {
       limit: 100,
       after: after,
-      properties: properties // ✅ Fetch all fields
+      properties: properties  // ✅ use the full list of properties
     };
 
     if (lastSync && lastSync > 0) {
@@ -101,10 +101,10 @@ async function fetchContacts() {
     const { data } = await hubspot.get('', { params });
 
     const mapped = data.results
-      .filter(contact => contact.id)
+      .filter(contact => contact.id) // Skip contacts missing an ID
       .map(contact => ({
         id: contact.id,
-        ...contact.properties // ✅ Merge properties into rows
+        ...contact.properties
       }));
 
     allContacts = allContacts.concat(mapped);
@@ -115,7 +115,7 @@ async function fetchContacts() {
 
   console.log(`✅ Finished fetching ${allContacts.length} contacts`);
 
-  await saveLastSyncTimestamp(now); // ✅ Save sync time
+  await saveLastSyncTimestamp(now);
 
   return allContacts;
 }
