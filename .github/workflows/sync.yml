@@ -26,6 +26,17 @@ jobs:
       with:
         credentials_json: ${{ secrets.GCP_KEY }}
 
+    - name: 🐛 Echo env
+      run: |
+        echo "Project ➜  $BQ_PROJECT_ID"
+        echo "Dataset ➜  $BQ_DATASET"
+        echo "Table   ➜  $BQ_TABLE"
+      env:
+        BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+        BQ_DATASET:    Thrive_HubSpot          # ← the same literal you pass below
+        BQ_TABLE:      Contacts
+
+
     - name: 🚀 Run ETL script
       env:
         HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
