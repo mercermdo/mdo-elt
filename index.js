@@ -34,17 +34,31 @@ async function getLastSyncTimestamp() {
   if (rows.length > 0 && rows[0].last_sync_timestamp) {
     let ts = rows[0].last_sync_timestamp;
 
+    console.log('🛰️ Raw last_sync_timestamp from BigQuery:', ts);
+
+    // If it's already a JavaScript Date object
     if (ts instanceof Date) {
       console.log(`✅ BigQuery returned a Date object: ${ts.toISOString()}`);
       return ts.getTime();
-    } else if (typeof ts === 'string') {
-      // Fix common format problems if needed
+    }
+
+    // If it's a string that needs formatting
+    if (typeof ts === 'string') {
+      console.log('🔵 Detected string, trying to clean it...');
       ts = ts.replace(' ', 'T').replace(' UTC', 'Z');
       const parsedDate = new Date(ts);
       if (!isNaN(parsedDate)) {
         console.log(`✅ Parsed last sync timestamp from string: ${parsedDate.toISOString()}`);
         return parsedDate.getTime();
+      } else {
+        console.warn('❗ Failed to parse cleaned string into valid Date.');
       }
+    }
+
+    // If it's a BigQuery TIMESTAMP object (numeric)
+    if (typeof ts === 'number') {
+      console.log(`✅ Parsed last sync timestamp from number: ${new Date(ts).toISOString()}`);
+      return ts;
     }
   }
 
@@ -54,13 +68,6 @@ async function getLastSyncTimestamp() {
   console.log(`✅ Fallback last sync timestamp: ${fallback.toISOString()}`);
   return fallback.getTime();
 }
-
-
-
-
-
-
-
 
 
 // 🕒 Step 3: Save the current sync time
