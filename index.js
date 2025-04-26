@@ -34,12 +34,13 @@ async function getLastSyncTimestamp() {
   if (rows.length > 0 && rows[0].last_sync_timestamp) {
     let ts = rows[0].last_sync_timestamp;
 
-    // Clean up if it's a string
     if (typeof ts === 'string') {
+      // Clean the format manually
       ts = ts.replace(' ', 'T').replace(' UTC', 'Z');
     }
 
     const parsedDate = new Date(ts);
+
     if (!isNaN(parsedDate)) {
       return parsedDate.getTime();
     }
