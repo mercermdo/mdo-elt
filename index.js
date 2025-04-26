@@ -36,30 +36,20 @@ async function getLastSyncTimestamp() {
 
     console.log('🛰️ Raw last_sync_timestamp from BigQuery:', ts);
 
-    // If it's already a JavaScript Date object
-    if (ts instanceof Date) {
-      console.log(`✅ BigQuery returned a Date object: ${ts.toISOString()}`);
-      return ts.getTime();
+    // If it's wrapped in a BigQueryTimestamp object, use .value
+    if (ts && typeof ts.value === 'string') {
+      console.log('🔵 Extracting timestamp value from BigQueryTimestamp...');
+      ts = ts.value;
     }
 
-    // If it's a string that needs formatting
-    if (typeof ts === 'string') {
-      console.log('🔵 Detected string, trying to clean it...');
-      ts = ts.replace(' ', 'T').replace(' UTC', 'Z');
-      const parsedDate = new Date(ts);
-      if (!isNaN(parsedDate)) {
-        console.log(`✅ Parsed last sync timestamp from string: ${parsedDate.toISOString()}`);
-        return parsedDate.getTime();
-      } else {
-        console.warn('❗ Failed to parse cleaned string into valid Date.');
-      }
+    // Now ts is a clean string
+    const parsedDate = new Date(ts);
+    if (!isNaN(parsedDate)) {
+      console.log(`✅ Parsed last sync timestamp: ${parsedDate.toISOString()}`);
+      return parsedDate.getTime();
     }
 
-    // If it's a BigQuery TIMESTAMP object (numeric)
-    if (typeof ts === 'number') {
-      console.log(`✅ Parsed last sync timestamp from number: ${new Date(ts).toISOString()}`);
-      return ts;
-    }
+    console.warn('❗ Failed to parse timestamp, using fallback.');
   }
 
   console.warn('⚠️ Could not parse last sync timestamp, using fallback.');
@@ -68,6 +58,7 @@ async function getLastSyncTimestamp() {
   console.log(`✅ Fallback last sync timestamp: ${fallback.toISOString()}`);
   return fallback.getTime();
 }
+
 
 
 // 🕒 Step 3: Save the current sync time
