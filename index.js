@@ -30,11 +30,15 @@ async function getLastSyncTimestamp() {
     LIMIT 1
   `;
   const [rows] = await bigquery.query({ query });
-  if (rows.length > 0) {
-    return rows[0].last_sync_timestamp ? new Date(rows[0].last_sync_timestamp).getTime() : null;
+  if (rows.length > 0 && rows[0].last_sync_timestamp) {
+    const parsedDate = new Date(rows[0].last_sync_timestamp);
+    if (!isNaN(parsedDate)) {
+      return parsedDate.getTime();
+    }
   }
   return null;
 }
+
 
 
 // 🕒 Step 3: Save the current sync time
