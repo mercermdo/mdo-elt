@@ -1,7 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
 const { BigQuery } = require('@google-cloud/bigquery');
-const fs = require('fs');
 
 const hubspot = axios.create({
   baseURL: 'https://api.hubapi.com/crm/v3/objects/contacts',
@@ -12,16 +11,7 @@ const bigquery = new BigQuery({
   projectId: process.env.BQ_PROJECT_ID,
 });
 
-// 📥 Step 1: Fetch all property names from HubSpot
-async function getAllPropertyNames() {
-  const res = await axios.get('https://api.hubapi.com/crm/v3/properties/contacts', {
-    headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
-  });
-
-  return res.data.results.map(p => p.name);
-}
-
-// 🕒 Step 2: Load the last sync time (saved locally)
+// 🕒 Step 1: Load the last sync time (saved locally)
 async function getLastSyncTimestamp() {
   const query = `
     SELECT last_sync_timestamp
@@ -36,13 +26,11 @@ async function getLastSyncTimestamp() {
 
     console.log('🛰️ Raw last_sync_timestamp from BigQuery:', ts);
 
-    // If it's wrapped in a BigQueryTimestamp object, use .value
     if (ts && typeof ts.value === 'string') {
       console.log('🔵 Extracting timestamp value from BigQueryTimestamp...');
       ts = ts.value;
     }
 
-    // Now ts is a clean string
     const parsedDate = new Date(ts);
     if (!isNaN(parsedDate)) {
       console.log(`✅ Parsed last sync timestamp: ${parsedDate.toISOString()}`);
@@ -53,15 +41,12 @@ async function getLastSyncTimestamp() {
   }
 
   console.warn('⚠️ Could not parse last sync timestamp, using fallback.');
-  // Fallback: 30 days ago
   const fallback = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   console.log(`✅ Fallback last sync timestamp: ${fallback.toISOString()}`);
   return fallback.getTime();
 }
 
-
-
-// 🕒 Step 3: Save the current sync time
+// 🕒 Step 2: Save the current sync time
 async function saveLastSyncTimestamp(timestamp) {
   const query = `
     MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\` t
@@ -75,14 +60,12 @@ async function saveLastSyncTimestamp(timestamp) {
   await bigquery.query({ query });
 }
 
-
-// 🔄 Step 4: Fetch contacts (paginated + recently updated)
+// 🔄 Step 3: Fetch contacts (paginated + recently updated)
 async function fetchContacts() {
   console.log('📡 Fetching contacts from HubSpot...');
   let allContacts = [];
   let after = undefined;
-  const properties = await getAllPropertyNames();
-  const lastSync = await getLastSyncTimestamp(); // ✅ Fix is here
+  const lastSync = await getLastSyncTimestamp();
   const now = Date.now();
 
   console.log(`Last sync was at: ${lastSync ? new Date(parseInt(lastSync)).toISOString() : 'Never (fetching all)'}`);
@@ -91,10 +74,10 @@ async function fetchContacts() {
     const params = {
       limit: 100,
       after: after,
-      properties: properties
+      // 🚫 Do NOT pass 'properties' — this is the key change
     };
 
-    if (lastSync) {
+    if (lastSync && lastSync > 0) {
       params['filterGroups'] = [
         {
           filters: [
@@ -111,12 +94,11 @@ async function fetchContacts() {
     const { data } = await hubspot.get('', { params });
 
     const mapped = data.results
-  .filter(contact => contact.id) // 👈 Skip contacts missing an ID
-  .map(contact => ({
-    id: contact.id,
-    ...contact.properties
-  }));
-
+      .filter(contact => contact.id) // Skip contacts missing an ID
+      .map(contact => ({
+        id: contact.id,
+        ...contact.properties
+      }));
 
     allContacts = allContacts.concat(mapped);
     after = data.paging?.next?.after;
@@ -125,13 +107,13 @@ async function fetchContacts() {
   } while (after);
 
   console.log(`✅ Finished fetching ${allContacts.length} contacts`);
-  
+
   saveLastSyncTimestamp(now);
 
   return allContacts;
 }
 
-// 📤 Step 5: Upload contacts to BigQuery
+// 📤 Step 4: Upload contacts to BigQuery
 async function loadToBigQuery(rows) {
   const table = bigquery.dataset(process.env.BQ_DATASET).table(process.env.BQ_TABLE);
   await table.insert(rows, { ignoreUnknownValues: true, skipInvalidRows: true });
