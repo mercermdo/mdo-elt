@@ -12,7 +12,7 @@ const bigquery = new BigQuery({
 });
 
 // 🛠️ 1. TEMP: Force a full sync ONCE
-const forceFullSync = true;
+const forceFullSync = false;
 
 // 🕒 Step 1: Load the last sync time
 async function getLastSyncTimestamp() {
