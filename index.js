@@ -31,13 +31,14 @@ async function getLastSyncTimestamp() {
   `;
   const [rows] = await bigquery.query({ query });
   if (rows.length > 0 && rows[0].last_sync_timestamp) {
-    const parsedDate = new Date(rows[0].last_sync_timestamp);
+    const parsedDate = new Date(rows[0].last_sync_timestamp.value);
     if (!isNaN(parsedDate)) {
       return parsedDate.getTime();
     }
   }
   return null;
 }
+
 
 
 
