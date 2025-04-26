@@ -11,8 +11,16 @@ const bigquery = new BigQuery({
   projectId: process.env.BQ_PROJECT_ID,
 });
 
-// 🕒 Step 1: Load the last sync time (saved locally)
+// 🛠️ 1. TEMP: Force a full sync ONCE
+const forceFullSync = true;
+
+// 🕒 Step 1: Load the last sync time
 async function getLastSyncTimestamp() {
+  if (forceFullSync) {
+    console.log('🚀 Force full sync: ignoring last sync timestamp.');
+    return null;
+  }
+
   const query = `
     SELECT last_sync_timestamp
     FROM \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\`
@@ -60,7 +68,7 @@ async function saveLastSyncTimestamp(timestamp) {
   await bigquery.query({ query });
 }
 
-// 🔄 Step 3: Fetch contacts (paginated + recently updated)
+// 🔄 Step 3: Fetch contacts
 async function fetchContacts() {
   console.log('📡 Fetching contacts from HubSpot...');
   let allContacts = [];
@@ -74,10 +82,10 @@ async function fetchContacts() {
     const params = {
       limit: 100,
       after: after,
-      // 🚫 Do NOT pass 'properties' — this is the key change
+      // Still no 'properties' list, fetch all
     };
 
-    if (lastSync && lastSync > 0) {
+    if (lastSync && !forceFullSync) {
       params['filterGroups'] = [
         {
           filters: [
@@ -94,7 +102,7 @@ async function fetchContacts() {
     const { data } = await hubspot.get('', { params });
 
     const mapped = data.results
-      .filter(contact => contact.id) // Skip contacts missing an ID
+      .filter(contact => contact.id)
       .map(contact => ({
         id: contact.id,
         ...contact.properties
@@ -108,7 +116,7 @@ async function fetchContacts() {
 
   console.log(`✅ Finished fetching ${allContacts.length} contacts`);
 
-  saveLastSyncTimestamp(now);
+  await saveLastSyncTimestamp(now);
 
   return allContacts;
 }
@@ -133,3 +141,4 @@ async function loadToBigQuery(rows) {
     console.error('❌ ETL failed:', err.message);
   }
 })();
+
