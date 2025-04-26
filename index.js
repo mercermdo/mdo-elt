@@ -11,16 +11,16 @@ const bigquery = new BigQuery({
   projectId: process.env.BQ_PROJECT_ID,
 });
 
-// 🛠️ 1. TEMP: Force a full sync ONCE
-const forceFullSync = false;
+// 📥 Step 1: Fetch all property names from HubSpot
+async function getAllPropertyNames() {
+  const res = await axios.get('https://api.hubapi.com/crm/v3/properties/contacts', {
+    headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
+  });
+  return res.data.results.map(p => p.name);
+}
 
-// 🕒 Step 1: Load the last sync time
+// 🕒 Step 2: Load the last sync time
 async function getLastSyncTimestamp() {
-  if (forceFullSync) {
-    console.log('🚀 Force full sync: ignoring last sync timestamp.');
-    return null;
-  }
-
   const query = `
     SELECT last_sync_timestamp
     FROM \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\`
@@ -31,7 +31,6 @@ async function getLastSyncTimestamp() {
 
   if (rows.length > 0 && rows[0].last_sync_timestamp) {
     let ts = rows[0].last_sync_timestamp;
-
     console.log('🛰️ Raw last_sync_timestamp from BigQuery:', ts);
 
     if (ts && typeof ts.value === 'string') {
@@ -44,7 +43,6 @@ async function getLastSyncTimestamp() {
       console.log(`✅ Parsed last sync timestamp: ${parsedDate.toISOString()}`);
       return parsedDate.getTime();
     }
-
     console.warn('❗ Failed to parse timestamp, using fallback.');
   }
 
@@ -54,7 +52,7 @@ async function getLastSyncTimestamp() {
   return fallback.getTime();
 }
 
-// 🕒 Step 2: Save the current sync time
+// 🕒 Step 3: Save the current sync time
 async function saveLastSyncTimestamp(timestamp) {
   const query = `
     MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\` t
@@ -68,11 +66,12 @@ async function saveLastSyncTimestamp(timestamp) {
   await bigquery.query({ query });
 }
 
-// 🔄 Step 3: Fetch contacts
+// 🔄 Step 4: Fetch contacts (with all properties)
 async function fetchContacts() {
   console.log('📡 Fetching contacts from HubSpot...');
   let allContacts = [];
   let after = undefined;
+  const properties = await getAllPropertyNames(); // ✅ Fetch property names
   const lastSync = await getLastSyncTimestamp();
   const now = Date.now();
 
@@ -82,10 +81,10 @@ async function fetchContacts() {
     const params = {
       limit: 100,
       after: after,
-      // Still no 'properties' list, fetch all
+      properties: properties // ✅ Fetch all fields
     };
 
-    if (lastSync && !forceFullSync) {
+    if (lastSync && lastSync > 0) {
       params['filterGroups'] = [
         {
           filters: [
@@ -105,7 +104,7 @@ async function fetchContacts() {
       .filter(contact => contact.id)
       .map(contact => ({
         id: contact.id,
-        ...contact.properties
+        ...contact.properties // ✅ Merge properties into rows
       }));
 
     allContacts = allContacts.concat(mapped);
@@ -116,12 +115,12 @@ async function fetchContacts() {
 
   console.log(`✅ Finished fetching ${allContacts.length} contacts`);
 
-  await saveLastSyncTimestamp(now);
+  await saveLastSyncTimestamp(now); // ✅ Save sync time
 
   return allContacts;
 }
 
-// 📤 Step 4: Upload contacts to BigQuery
+// 📤 Step 5: Upload contacts to BigQuery
 async function loadToBigQuery(rows) {
   const table = bigquery.dataset(process.env.BQ_DATASET).table(process.env.BQ_TABLE);
   await table.insert(rows, { ignoreUnknownValues: true, skipInvalidRows: true });
@@ -141,4 +140,5 @@ async function loadToBigQuery(rows) {
     console.error('❌ ETL failed:', err.message);
   }
 })();
+
 
