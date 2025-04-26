@@ -22,18 +22,35 @@ async function getAllPropertyNames() {
 }
 
 // 🕒 Step 2: Load the last sync time (saved locally)
-function getLastSyncTimestamp() {
-  if (fs.existsSync('lastSync.json')) {
-    const data = fs.readFileSync('lastSync.json');
-    return JSON.parse(data).lastSync;
+async function getLastSyncTimestamp() {
+  const query = `
+    SELECT last_sync_timestamp
+    FROM \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\`
+    WHERE entity = 'contacts'
+    LIMIT 1
+  `;
+  const [rows] = await bigquery.query({ query });
+  if (rows.length > 0) {
+    return rows[0].last_sync_timestamp ? new Date(rows[0].last_sync_timestamp).getTime() : null;
   }
   return null;
 }
 
+
 // 🕒 Step 3: Save the current sync time
-function saveLastSyncTimestamp(timestamp) {
-  fs.writeFileSync('lastSync.json', JSON.stringify({ lastSync: timestamp }));
+async function saveLastSyncTimestamp(timestamp) {
+  const query = `
+    MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\` t
+    USING (SELECT 'contacts' AS entity) s
+    ON t.entity = s.entity
+    WHEN MATCHED THEN
+      UPDATE SET last_sync_timestamp = TIMESTAMP_MILLIS(${timestamp})
+    WHEN NOT MATCHED THEN
+      INSERT (entity, last_sync_timestamp) VALUES ('contacts', TIMESTAMP_MILLIS(${timestamp}))
+  `;
+  await bigquery.query({ query });
 }
+
 
 // 🔄 Step 4: Fetch contacts (paginated + recently updated)
 async function fetchContacts() {
