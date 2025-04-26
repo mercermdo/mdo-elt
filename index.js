@@ -35,7 +35,7 @@ async function getLastSyncTimestamp() {
     let ts = rows[0].last_sync_timestamp;
 
     if (typeof ts === 'string') {
-      // Fix format: replace space with T and UTC with Z
+      // Fix format manually
       ts = ts.replace(' ', 'T').replace(' UTC', 'Z');
     }
 
@@ -85,7 +85,7 @@ async function fetchContacts() {
   let allContacts = [];
   let after = undefined;
   const properties = await getAllPropertyNames();
-  const lastSync = getLastSyncTimestamp();
+  const lastSync = await getLastSyncTimestamp(); // ✅ Fix is here
   const now = Date.now();
 
   console.log(`Last sync was at: ${lastSync ? new Date(parseInt(lastSync)).toISOString() : 'Never (fetching all)'}`);
