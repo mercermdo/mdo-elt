@@ -110,10 +110,13 @@ async function fetchContacts() {
 
     const { data } = await hubspot.get('', { params });
 
-    const mapped = data.results.map(contact => ({
-      id: contact.id,
-      ...contact.properties
-    }));
+    const mapped = data.results
+  .filter(contact => contact.id) // 👈 Skip contacts missing an ID
+  .map(contact => ({
+    id: contact.id,
+    ...contact.properties
+  }));
+
 
     allContacts = allContacts.concat(mapped);
     after = data.paging?.next?.after;
