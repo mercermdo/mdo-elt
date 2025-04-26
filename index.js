@@ -5,7 +5,7 @@ const axios       = require('axios');
 const {BigQuery}  = require('@google-cloud/bigquery');
 
 const hubspot  = axios.create({
-  baseURL : 'https://api.hubapi.com/crm/v3/',
+  baseURL : 'https://api.hubapi.com/crm/v3/objects/contacts',
   headers : { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
 });
 
@@ -54,7 +54,8 @@ async function getLastSyncTimestamp() {
   return Date.now() - 30*24*60*60*1000;
 }
 
-async function saveLastSync(ts) {
+async function saveLastSyncTimestamp(ts) {
+ {
   const sql = `
     MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\` T
     USING (SELECT 'contacts' AS entity) S
@@ -151,8 +152,7 @@ async function ensureTable(schemaFields) {
     ];
 
     /* 2 ─ fetch contacts changed since last sync */
-    const since     = await getLastSyncTimestamp();
-    const contacts  = await fetchContacts(hubProps, since);
+    const contacts  = await fetchContacts(hubProps);
 
     /* 3 ─ map contact keys to sanitised column names */
     const propMap = Object.fromEntries(hubProps.map(p => [p.name, sanitise(p.name)]));
@@ -170,8 +170,8 @@ async function ensureTable(schemaFields) {
     if (rows.length) await table.insert(rows, {ignoreUnknownValues:true, skipInvalidRows:true});
 
     /* 5 ─ record sync */
-    await saveLastSync(Date.now());
-
+    await saveLastSyncTimestamp(Date.now());
+    
     console.log(`✅ Uploaded ${rows.length} rows across ${schema.length} columns`);
   } catch (e) {
     console.error('❌ ETL failed:', e);
