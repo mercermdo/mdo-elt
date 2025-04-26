@@ -11,7 +11,7 @@ const bigquery = new BigQuery({
   projectId: process.env.BQ_PROJECT_ID,
 });
 
-// 📥 Step 1: Fetch all property names from HubSpot
+// 📥 Fetch all HubSpot contact properties
 async function getAllPropertyNames() {
   const res = await axios.get('https://api.hubapi.com/crm/v3/properties/contacts', {
     headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
@@ -19,7 +19,7 @@ async function getAllPropertyNames() {
   return res.data.results.map(p => p.name);
 }
 
-// 🕒 Step 2: Load the last sync time
+// 🕒 Load last sync timestamp
 async function getLastSyncTimestamp() {
   const query = `
     SELECT last_sync_timestamp
@@ -52,7 +52,7 @@ async function getLastSyncTimestamp() {
   return fallback.getTime();
 }
 
-// 🕒 Step 3: Save the current sync time
+// 🕒 Save the new sync timestamp
 async function saveLastSyncTimestamp(timestamp) {
   const query = `
     MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\` t
@@ -66,14 +66,14 @@ async function saveLastSyncTimestamp(timestamp) {
   await bigquery.query({ query });
 }
 
-// 🔄 Step 4: Fetch contacts (with all properties)
+// 🔄 Fetch contacts (full properties)
 async function fetchContacts() {
   console.log('📡 Fetching contacts from HubSpot...');
   let allContacts = [];
   let after = undefined;
   const lastSync = await getLastSyncTimestamp();
   const now = Date.now();
-  const properties = await getAllPropertyNames();  // ✅ fetch all property names!
+  const properties = await getAllPropertyNames();
 
   console.log(`Last sync was at: ${lastSync ? new Date(parseInt(lastSync)).toISOString() : 'Never (fetching all)'}`);
 
@@ -81,7 +81,7 @@ async function fetchContacts() {
     const params = {
       limit: 100,
       after: after,
-      properties: properties  // ✅ use the full list of properties
+      properties: properties
     };
 
     if (lastSync && lastSync > 0) {
@@ -101,7 +101,7 @@ async function fetchContacts() {
     const { data } = await hubspot.get('', { params });
 
     const mapped = data.results
-      .filter(contact => contact.id) // Skip contacts missing an ID
+      .filter(contact => contact.id)
       .map(contact => ({
         id: contact.id,
         ...contact.properties
@@ -120,14 +120,29 @@ async function fetchContacts() {
   return allContacts;
 }
 
-// 📤 Step 5: Upload contacts to BigQuery
+// 📤 Upload to BigQuery (auto-create schema)
 async function loadToBigQuery(rows) {
-  const table = bigquery.dataset(process.env.BQ_DATASET).table(process.env.BQ_TABLE);
+  const dataset = bigquery.dataset(process.env.BQ_DATASET);
+  const table = dataset.table(process.env.BQ_TABLE);
+
+  const [exists] = await table.exists();
+  if (!exists) {
+    console.log('🚧 Table does not exist. Creating it dynamically...');
+    const firstRow = rows[0];
+    const schema = Object.keys(firstRow).map(key => ({
+      name: key.replace(/[^\w]/g, '_'),  // sanitize property names
+      type: 'STRING'
+    }));
+
+    await dataset.createTable(process.env.BQ_TABLE, { schema });
+    console.log('✅ Created table with dynamic schema.');
+  }
+
   await table.insert(rows, { ignoreUnknownValues: true, skipInvalidRows: true });
   console.log(`🎉 Uploaded ${rows.length} contacts to BigQuery`);
 }
 
-// 🚀 Main ETL Runner
+// 🚀 Main ETL runner
 (async () => {
   try {
     const rows = await fetchContacts();
@@ -140,5 +155,3 @@ async function loadToBigQuery(rows) {
     console.error('❌ ETL failed:', err.message);
   }
 })();
-
-
