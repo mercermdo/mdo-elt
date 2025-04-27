@@ -6,7 +6,7 @@ const { BigQuery } = require('@google-cloud/bigquery');
 
 // ───────────────────────────── HubSpot + BigQuery clients
 const hubspot = axios.create({
-  baseURL : 'https://api.hubapi.com/crm/v3/objects/contacts', // ← for contact pages
+  baseURL : 'https://api.hubapi.com/crm/v3/objects/contacts',
   headers : { Authorization:`Bearer ${process.env.HUBSPOT_TOKEN}` }
 });
 
@@ -25,8 +25,7 @@ function hubTypeToBq(t) {
 
 /* ─────────────────── property catalogue (stand‑alone request) */
 async function getAllPropertyMetadata() {
-  let props = [];
-  let after;
+  let props = []; let after;
   do {
     const { data } = await axios.get(
       'https://api.hubapi.com/crm/v3/properties/contacts',
@@ -64,11 +63,10 @@ async function saveLastSyncTimestamp(ts) {
 }
 
 /* ─────────────────── fetch contacts (all props, de‑chunked) */
-/* ─────────────────────────────────────────────── contact fetch & load */
 async function fetchContacts(allProps) {
   console.log('📡 Fetching contacts from HubSpot…');
 
-  /* --- split the full property list into ≤100-item chunks --- */
+  // split the full property list into ≤100‑item chunks
   const propChunks = [];
   for (let i = 0; i < allProps.length; i += 100) {
     propChunks.push(allProps.slice(i, i + 100).map(p => p.name));
@@ -78,34 +76,27 @@ async function fetchContacts(allProps) {
   const lastSync = await getLastSyncTimestamp();
   const now      = Date.now();
 
-  /* ── loop over EACH property chunk, paging through the contacts list ── */
+  // ── iterate over property‑chunks; each chunk walks every contact page ──
   for (const props of propChunks) {
-    let after = undefined;                           // reset for every chunk
+    let after;                                       // reset for THIS chunk
     do {
-      const params = {
-        limit: 100,
-        after,
-        properties: props
-      };
+      const params = { limit:100, after, properties:props };
 
       if (lastSync) {
         params.filterGroups = [{
-          filters: [{
-            propertyName: 'hs_lastmodifieddate',
-            operator:     'GT',
-            value:        lastSync.toString()
+          filters:[{
+            propertyName:'hs_lastmodifieddate', operator:'GT', value:lastSync.toString()
           }]
         }];
       }
 
       const { data } = await hubspot.get('', { params });
 
-      /* merge this chunk’s properties into the master object */
       data.results.forEach(c => {
-        contacts[c.id] = { id: c.id, ...(contacts[c.id] || {}), ...c.properties };
+        contacts[c.id] = { id:c.id, ...(contacts[c.id]||{}), ...c.properties };
       });
 
-      after = data.paging?.next?.after;              // page to next set
+      after = data.paging?.next?.after;              // page within this chunk
     } while (after);
   }
 
@@ -113,7 +104,6 @@ async function fetchContacts(allProps) {
   await saveLastSyncTimestamp(now);
   return Object.values(contacts);
 }
-
 
 /* ─────────────────── table creator/extender */
 async function ensureTable(schemaFields) {
@@ -141,7 +131,7 @@ async function ensureTable(schemaFields) {
   try {
     // 1. schema
     const hubProps = await getAllPropertyMetadata();
-    const schema = [
+    const schema   = [
       { name:'id', type:'STRING', mode:'REQUIRED' },
       ...hubProps.map(p => ({ name:sanitise(p.name), type:hubTypeToBq(p.type), mode:'NULLABLE' }))
     ];
