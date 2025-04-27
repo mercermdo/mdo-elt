@@ -4,12 +4,14 @@ require('dotenv').config();
 const axios = require('axios');
 const { BigQuery } = require('@google-cloud/bigquery');
 
-// HubSpot client\const hubspot = axios.create({
+// HubSpot client
+const hubspot = axios.create({
   baseURL: 'https://api.hubapi.com/crm/v3/objects/contacts',
   headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
 });
 
-// BigQuery client\const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
+// BigQuery client
+const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
 
 (async () => {
   try {
@@ -43,9 +45,10 @@ const { BigQuery } = require('@google-cloud/bigquery');
       query: deleteSql,
       params: allIds
     });
-    const [result] = await job.getQueryResults();
+    await job.getQueryResults();
+    const deletedCount = job.metadata.statistics.query.dmlStats.deletedRowCount || 0;
 
-    console.log(`✅ Deleted ${job.statistic.query.dmlStats.deletedRowCount || 0} contacts from BigQuery`);
+    console.log(`✅ Deleted ${deletedCount} contacts from BigQuery`);
   } catch (err) {
     console.error('❌ Cleanup failed:', err);
     process.exit(1);
