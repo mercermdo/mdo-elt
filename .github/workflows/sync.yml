@@ -1,4 +1,4 @@
-name: Hourly HubSpot ETL to BigQuery
+name: Hourly HubSpot ELT to BigQuery
 
 on:
   schedule:
@@ -38,11 +38,11 @@ jobs:
         echo "Table   ➜  $BQ_TABLE"
       env:
         BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
-        BQ_DATASET:    Thrive_HubSpot          # ← the same literal you pass below
-        BQ_TABLE:      Contacts
+        BQ_DATASET:    ${{ secrets.BQ_DATASET }}         # ← the same literal you pass below
+        BQ_TABLE:      ${{ secrets.BQ_TABLE }}
 
 
-    - name: 🚀 Run ETL script
+    - name: 🚀 Run ELT script
       env:
         HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
         BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
