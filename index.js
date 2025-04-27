@@ -64,48 +64,56 @@ async function saveLastSyncTimestamp(ts) {
 }
 
 /* ─────────────────── fetch contacts (all props, de‑chunked) */
+/* ─────────────────────────────────────────────── contact fetch & load */
 async function fetchContacts(allProps) {
   console.log('📡 Fetching contacts from HubSpot…');
 
-  // chunk properties (HubSpot max 100 per request)
+  /* --- split the full property list into ≤100-item chunks --- */
   const propChunks = [];
   for (let i = 0; i < allProps.length; i += 100) {
     propChunks.push(allProps.slice(i, i + 100).map(p => p.name));
   }
 
+  const contacts = {};                               // { id → merged properties }
   const lastSync = await getLastSyncTimestamp();
-  const contacts = {};       // id → merged record
-  let after;
+  const now      = Date.now();
 
-  do {
-    let nextAfter;
-    for (let idx = 0; idx < propChunks.length; idx++) {
+  /* ── loop over EACH property chunk, paging through the contacts list ── */
+  for (const props of propChunks) {
+    let after = undefined;                           // reset for every chunk
+    do {
       const params = {
-        limit:100,
+        limit: 100,
         after,
-        properties: propChunks[idx]
+        properties: props
       };
+
       if (lastSync) {
         params.filterGroups = [{
-          filters:[{ propertyName:'hs_lastmodifieddate', operator:'GT', value:lastSync.toString() }]
+          filters: [{
+            propertyName: 'hs_lastmodifieddate',
+            operator:     'GT',
+            value:        lastSync.toString()
+          }]
         }];
       }
+
       const { data } = await hubspot.get('', { params });
 
-      // keep paging cursor only from the *first* chunk
-      if (idx === 0) nextAfter = data.paging?.next?.after;
-
+      /* merge this chunk’s properties into the master object */
       data.results.forEach(c => {
-        contacts[c.id] = { id:c.id, ...(contacts[c.id]||{}), ...c.properties };
+        contacts[c.id] = { id: c.id, ...(contacts[c.id] || {}), ...c.properties };
       });
-    }
-    after = nextAfter;
-  } while (after);
+
+      after = data.paging?.next?.after;              // page to next set
+    } while (after);
+  }
 
   console.log(`✅ Finished fetching ${Object.keys(contacts).length} contacts`);
-  await saveLastSyncTimestamp(Date.now());
+  await saveLastSyncTimestamp(now);
   return Object.values(contacts);
 }
+
 
 /* ─────────────────── table creator/extender */
 async function ensureTable(schemaFields) {
