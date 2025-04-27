@@ -45,8 +45,12 @@ const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
       query: deleteSql,
       params: allIds
     });
+    // wait for completion
     await job.getQueryResults();
-    const deletedCount = job.metadata.statistics.query.dmlStats.deletedRowCount || 0;
+
+    // fetch metadata for dml stats
+    const [metadata] = await job.getMetadata();
+    const deletedCount = metadata.statistics?.query?.dmlStats?.deletedRowCount || 0;
 
     console.log(`✅ Deleted ${deletedCount} contacts from BigQuery`);
   } catch (err) {
@@ -54,3 +58,4 @@ const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
     process.exit(1);
   }
 })();
+
