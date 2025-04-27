@@ -13,6 +13,7 @@ const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
 /* ---------- helpers -------------------------------------------------- */
 const sanitise = n =>
   (/^[^a-z]/i.test(n = n.toLowerCase().replace(/[^a-z0-9_]/g, '_')) ? 'p_' + n : n);
+
 const hub2bq = t => ({
   string: 'STRING',
   number: 'FLOAT',
@@ -69,7 +70,13 @@ async function fetchContacts(props) {
   const since = await lastSync();
   const now = Date.now();
 
-  params.filterGroups = [{ filters: [{ propertyName: 'hs_lastmodifieddate', operator: 'GT', value: since.toString() }] }];
+  params.filterGroups = [{
+    filters: [{
+      propertyName: 'hs_lastmodifieddate',
+      operator: 'GT',
+      value: since.toString()
+    }]
+  }];
 
   let after;
   do {
@@ -116,7 +123,9 @@ async function streamToStage(rows, schema) {
     } catch (e) {
       if (e.name === 'PartialFailureError' && e.errors?.length) {
         console.warn('⚠️  stage batch errors (first 3):');
-        e.errors.slice(0, 3).forEach(err => console.warn(err.errors, 'row snippet', JSON.stringify(err.row).slice(0,200)));
+        e.errors.slice(0, 3).forEach(err =>
+          console.warn(err.errors, 'row snippet', JSON.stringify(err.row).slice(0,200))
+        );
       } else {
         throw e;
       }
@@ -127,7 +136,8 @@ async function streamToStage(rows, schema) {
 /* ---------- merge stage → master ------------------------------------ */
 async function mergeStageIntoMaster(schema) {
   const cols = schema.map(f => `\`${f.name}\``).join(', ');
-  const updates = schema.filter(f => f.name !== 'id')
+  const updates = schema
+    .filter(f => f.name !== 'id')
     .map(f => `T.\`${f.name}\` = S.\`${f.name}\``).join(', ');
 
   const sql = `
@@ -160,10 +170,17 @@ async function mergeStageIntoMaster(schema) {
       for (const [k, v] of Object.entries(c)) {
         if (k === 'id') continue;
         const col = propMap[k];
-        if (v === '' || v == null) { r[col] = null; continue; }
+
+        // null/empty-string ➔ NULL
+        if (v === '' || v == null) {
+          r[col] = null;
+          continue;
+        }
+
         switch (typeMap[k]) {
           case 'number': {
-            const n = parseFloat(v.toString().replace(/[\d.-]/g, ''));
+            // strip any non-digit (e.g. “$”, “,”) then parse
+            const n = parseFloat(v.toString().replace(/[^\d.-]/g, ''));
             r[col] = isNaN(n) ? null : n;
             break;
           }
