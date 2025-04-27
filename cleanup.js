@@ -1,46 +1,34 @@
-// cleanup.js
-require('dotenv').config();
-const axios      = require('axios');
-const { BigQuery } = require('@google-cloud/bigquery');
-const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
+name: Nightly HubSpot Deletes → BigQuery
 
-// 1) Fetch all archived/deleted contacts in HubSpot
-async function fetchDeletedIds() {
-  let deleted = [], after;
-  const client = axios.create({
-    baseURL: 'https://api.hubapi.com/crm/v3/objects/contacts',
-    headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
-  });
-  do {
-    const { data } = await client.get('', {
-      params: { archived: true, limit: 100, after }
-    });
-    deleted.push(...data.results.map(c => c.id));
-    after = data.paging?.next?.after;
-  } while (after);
-  return deleted;
-}
+on:
+  schedule:
+    - cron: '0 2 * * *'      # every night at 2am
+  workflow_dispatch:        # allow manual runs too
 
-// 2) Delete them from BQ
-async function deleteFromBQ(ids) {
-  if (!ids.length) {
-    console.log('✅ No deleted contacts to remove.');
-    return;
-  }
-  const sql = `
-    DELETE FROM \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.${process.env.BQ_TABLE}\`
-    WHERE id IN UNNEST(@ids)
-  `;
-  await bq.query({ query: sql, params: { ids } });
-  console.log(`✅ Deleted ${ids.length} contacts from BigQuery`);
-}
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-(async () => {
-  try {
-    const ids = await fetchDeletedIds();
-    await deleteFromBQ(ids);
-  } catch (e) {
-    console.error('❌ Cleanup failed:', e);
-    process.exit(1);
-  }
-})();
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_KEY }}
+
+      - name: Remove deleted contacts
+        run: node cleanup.js
+        env:
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+          BQ_PROJECT_ID:  ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET:     ${{ secrets.BQ_DATASET }}
+          BQ_TABLE:       ${{ secrets.BQ_TABLE }}
