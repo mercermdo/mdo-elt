@@ -118,11 +118,25 @@ async function insertBatches(table, rows, batchSize=500){
     const map   = Object.fromEntries(props.map(p=>[p.name,sanitise(p.name)]));
 
     // → build rows, coercing every value to a string to avoid type errors
-    const rows=data.map(c=>{
-      const r={id:c.id};
-      for(const[k,v]of Object.entries(c)) if(k!=='id') r[map[k]]=(v==null?null:String(v));
+       // → build rows, turning **empty strings ("")** into NULL
+    const rows = data.map(c => {
+      const r = { id: c.id };
+
+      for (const [k, v] of Object.entries(c)) {
+        if (k === 'id') continue;
+
+        // BigQuery rejects "" for numeric / date columns → store as NULL
+        if (v === '') {
+          r[ map[k] ] = null;
+          continue;
+        }
+
+        // everything else: leave the original value (string, number, etc.)
+        r[ map[k] ] = v ?? null;
+      }
       return r;
     });
+
 
     const table=await ensureTable(schema);
     await insertBatches(table, rows);
