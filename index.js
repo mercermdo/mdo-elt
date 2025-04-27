@@ -1,12 +1,12 @@
 // index.js  —— HubSpot ➜ BigQuery with true upsert (stream → stage → MERGE)
 
 require('dotenv').config();
-const axios = require('axios');
+const axios       = require('axios');
 const { BigQuery } = require('@google-cloud/bigquery');
 
 const hubspot = axios.create({
-  baseURL: 'https://api.hubapi.com/crm/v3/objects/contacts',
-  headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
+  baseURL : 'https://api.hubapi.com/crm/v3/objects/contacts',
+  headers : { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
 });
 const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
 
@@ -89,12 +89,11 @@ async function ensureTable(tableName, schema) {
   const tb = ds.table(tableName);
   const [exists] = await tb.exists();
   if (!exists) {
-    await ds.createTable(tableName, { schema: { fields: schema } });
-    return tb;
+    return ds.createTable(tableName, { schema: { fields: schema } }).then(r => r[0]);
   }
   const [meta] = await tb.getMetadata();
   const have = new Set(meta.schema.fields.map(f => f.name));
-  const add = schema.filter(f => !have.has(f.name));
+  const add  = schema.filter(f => !have.has(f.name));
   if (add.length) {
     meta.schema.fields.push(...add);
     await tb.setMetadata({ schema: meta.schema });
@@ -105,10 +104,10 @@ async function ensureTable(tableName, schema) {
 /* ---------- batch-insert into staging with retry/errors ------------ */
 async function streamToStage(rows, schema) {
   const stage = await ensureTable('Contacts_stage', schema);
-  await stage.delete({ ignoreNotFound: true });
-  await stage.create({ schema: { fields: schema } });
+  // truncate existing stage
+  await bq.query({ query: `TRUNCATE TABLE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.Contacts_stage\`` });
 
-  const batchSize = 50;
+  const batchSize = 200;
   for (let i = 0; i < rows.length; i += batchSize) {
     const slice = rows.slice(i, i + batchSize).map(r => ({ insertId: r.id, json: r }));
     try {
@@ -116,9 +115,7 @@ async function streamToStage(rows, schema) {
     } catch (e) {
       if (e.name === 'PartialFailureError' && e.errors?.length) {
         console.warn('⚠️  stage batch errors (first 3):');
-        e.errors.slice(0, 3).forEach(err => {
-          console.warn(err.errors, 'row:', JSON.stringify(err.row).slice(0,200));
-        });
+        e.errors.slice(0, 3).forEach(err => console.warn(err.errors, 'row snippet', JSON.stringify(err.row).slice(0,200)));
       } else {
         throw e;
       }
