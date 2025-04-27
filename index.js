@@ -134,7 +134,6 @@ async function streamToStage(rows, schema) {
 }
 
 /* ---------- merge stage → master ------------------------------------ */
-/* ---------- merge stage → master ------------------------------------ */
 async function mergeStageIntoMaster(schema) {
   const cols = schema.map(f => `\`${f.name}\``).join(', ');
   const updates = schema
@@ -149,8 +148,6 @@ async function mergeStageIntoMaster(schema) {
       UPDATE SET ${updates}
     WHEN NOT MATCHED THEN
       INSERT (${cols}) VALUES (${cols})
-    WHEN NOT MATCHED BY SOURCE THEN
-      DELETE;
   `;
 
   await bq.query({ query: sql });
