@@ -3,18 +3,29 @@ name: Nightly HubSpot Deletes → BigQuery
 on:
   schedule:
     - cron: '0 2 * * *'      # every night at 2am
-  workflow_dispatch:        # manual trigger
+  workflow_dispatch:        # allow manual trigger
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with: { node-version: 18 }
-      - run: npm install
-      - uses: google-github-actions/auth@v1
-        with: credentials_json: ${{ secrets.GCP_KEY }}
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_KEY }}
+
       - name: Remove deleted contacts
         run: node cleanup.js
         env:
@@ -22,3 +33,4 @@ jobs:
           BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
           BQ_DATASET:    ${{ secrets.BQ_DATASET }}
           BQ_TABLE:      ${{ secrets.BQ_TABLE }}
+
