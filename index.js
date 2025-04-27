@@ -1,19 +1,19 @@
 // index.js  —— HubSpot ➜ BigQuery with true upsert (stream → stage → MERGE)
 
 require('dotenv').config();
-const axios       = require('axios');
+const axios = require('axios');
 const { BigQuery } = require('@google-cloud/bigquery');
 
 const hubspot = axios.create({
-  baseURL : 'https://api.hubapi.com/crm/v3/objects/contacts',
-  headers : { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
+  baseURL: 'https://api.hubapi.com/crm/v3/objects/contacts',
+  headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
 });
 const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
 
 /* ---------- helpers -------------------------------------------------- */
 const sanitise = n =>
   (/^[^a-z]/i.test(n = n.toLowerCase().replace(/[^a-z0-9_]/g, '_')) ? 'p_' + n : n);
-const hub2bq    = t => ({
+const hub2bq = t => ({
   string: 'STRING',
   number: 'FLOAT',
   datetime: 'TIMESTAMP',
@@ -89,11 +89,12 @@ async function ensureTable(tableName, schema) {
   const tb = ds.table(tableName);
   const [exists] = await tb.exists();
   if (!exists) {
-    return ds.createTable(tableName, { schema: { fields: schema } }).then(r => r[0]);
+    const [table] = await ds.createTable(tableName, { schema: { fields: schema } });
+    return table;
   }
   const [meta] = await tb.getMetadata();
   const have = new Set(meta.schema.fields.map(f => f.name));
-  const add  = schema.filter(f => !have.has(f.name));
+  const add = schema.filter(f => !have.has(f.name));
   if (add.length) {
     meta.schema.fields.push(...add);
     await tb.setMetadata({ schema: meta.schema });
@@ -109,7 +110,7 @@ async function streamToStage(rows, schema) {
 
   const batchSize = 200;
   for (let i = 0; i < rows.length; i += batchSize) {
-    const slice = rows.slice(i, i + batchSize).map(r => ({ insertId: r.id, json: r }));
+    const slice = rows.slice(i, i + batchSize);
     try {
       await stage.insert(slice, { ignoreUnknownValues: true, skipInvalidRows: true });
     } catch (e) {
@@ -162,7 +163,7 @@ async function mergeStageIntoMaster(schema) {
         if (v === '' || v == null) { r[col] = null; continue; }
         switch (typeMap[k]) {
           case 'number': {
-            const n = parseFloat(v.toString().replace(/[^\d.-]/g,''));
+            const n = parseFloat(v.toString().replace(/[\d.-]/g, ''));
             r[col] = isNaN(n) ? null : n;
             break;
           }
