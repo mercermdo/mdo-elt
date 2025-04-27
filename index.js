@@ -113,12 +113,13 @@ async function ensureTable(schema){
 /* ── batch insert with detailed error logging ──────────────────────── */
 async function insertBatches(table, rows, batchSize = 500){
   for (let i = 0; i < rows.length; i += batchSize){
-    const slice = rows.slice(i, i + batchSize);
+    const slice   = rows.slice(i, i + batchSize);
+    const payload = slice.map(r => ({ insertId: r.id, json: r })); // <- NEW
+
     try{
-      await table.insert(slice, {
+      await table.insert(payload, {
         ignoreUnknownValues:true,
         skipInvalidRows:true,
-        // insertId ensures idempotency (no future duplicates):
         schemaUpdateOptions:['ALLOW_FIELD_ADDITION']
       });
     }catch(e){
@@ -128,9 +129,8 @@ async function insertBatches(table, rows, batchSize = 500){
           console.warn(JSON.stringify(err.errors), 'row snippet:',
                        JSON.stringify(err.row).slice(0,200));
         });
-        // continue with the next chunk
       }else{
-        throw e;   // a genuine fatal error
+        throw e;
       }
     }
   }
