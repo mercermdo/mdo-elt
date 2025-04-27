@@ -1,181 +1,160 @@
-// index.js  ── dynamic, paginated, self-expanding schema
+// index.js  ── dynamic, paginated, self‑expanding schema
 
 require('dotenv').config();
-const axios       = require('axios');
-const {BigQuery}  = require('@google-cloud/bigquery');
+const axios      = require('axios');
+const { BigQuery } = require('@google-cloud/bigquery');
 
-const hubspot  = axios.create({
-  baseURL : 'https://api.hubapi.com/crm/v3/objects/contacts',
-  headers : { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
+// ───────────────────────────── HubSpot + BigQuery clients
+const hubspot = axios.create({
+  baseURL : 'https://api.hubapi.com/crm/v3/objects/contacts', // ← for contact pages
+  headers : { Authorization:`Bearer ${process.env.HUBSPOT_TOKEN}` }
 });
 
 const bigquery = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
 
-/* ──────────────────────────────────────────────────────────── helpers */
-
+/* ───────────────────────────────────────── helpers */
 function sanitise(name) {
-  // to lower-case, replace anything not [a-z0-9_] with underscore
-  let n = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-  // BigQuery cannot start with digit or underscore
-  if (/^[^a-z]/.test(n)) n = 'p_' + n;
+  let n = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');   // keep only safe chars
+  if (/^[^a-z]/.test(n)) n = 'p_' + n;                      // must start with letter
   return n;
 }
 
-function hubTypeToBq(type) {
-  return (
-    { string:'STRING',number:'FLOAT',datetime:'TIMESTAMP',date:'DATE',bool:'BOOLEAN' }[type] ||
-    'STRING'
-  );
+function hubTypeToBq(t) {
+  return ({string:'STRING', number:'FLOAT', datetime:'TIMESTAMP', date:'DATE', bool:'BOOLEAN'}[t] || 'STRING');
 }
 
+/* ─────────────────── property catalogue (stand‑alone request) */
 async function getAllPropertyMetadata() {
   let props = [];
-  let after = undefined;
+  let after;
   do {
-    const { data } = await hubspot.get('properties/contacts', {
-      params: { limit: 100, after, archived:false }
-    });
+    const { data } = await axios.get(
+      'https://api.hubapi.com/crm/v3/properties/contacts',
+      {
+        headers: { Authorization:`Bearer ${process.env.HUBSPOT_TOKEN}` },
+        params : { limit:100, after, archived:false }
+      }
+    );
     props = props.concat(data.results);
-    after = data.paging?.next?.after;
+    after  = data.paging?.next?.after;
   } while (after);
   return props;
 }
 
+/* ─────────────────── sync tracker helpers */
 async function getLastSyncTimestamp() {
-  const sql = `
-    SELECT last_sync_timestamp
-    FROM \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\`
-    WHERE entity = 'contacts' LIMIT 1`;
-  const [rows] = await bigquery.query({query:sql});
+  const sql = `SELECT last_sync_timestamp
+              FROM \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\`
+              WHERE entity='contacts' LIMIT 1`;
+  const [rows] = await bigquery.query({ query: sql });
   if (rows.length && rows[0].last_sync_timestamp) {
     return new Date(rows[0].last_sync_timestamp.value || rows[0].last_sync_timestamp).getTime();
   }
-  // default: 30 days ago
-  return Date.now() - 30*24*60*60*1000;
+  return Date.now() - 30*24*60*60*1000; // default 30 days
 }
 
 async function saveLastSyncTimestamp(ts) {
- {
-  const sql = `
-    MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\` T
-    USING (SELECT 'contacts' AS entity) S
-    ON T.entity = S.entity
-    WHEN MATCHED THEN
-      UPDATE SET last_sync_timestamp = TIMESTAMP_MILLIS(${ts})
-    WHEN NOT MATCHED THEN
-      INSERT (entity,last_sync_timestamp) VALUES ('contacts',TIMESTAMP_MILLIS(${ts}))`;
-  await bigquery.query({query:sql});
+  const sql = `MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.sync_tracker\` T
+               USING (SELECT 'contacts' AS entity) S
+               ON T.entity = S.entity
+               WHEN MATCHED THEN UPDATE SET last_sync_timestamp = TIMESTAMP_MILLIS(${ts})
+               WHEN NOT MATCHED THEN INSERT (entity,last_sync_timestamp)
+               VALUES ('contacts', TIMESTAMP_MILLIS(${ts}))`;
+  await bigquery.query({ query: sql });
 }
 
-/* ─────────────────────────────────────────────── contact fetch & load */
-
+/* ─────────────────── fetch contacts (all props, de‑chunked) */
 async function fetchContacts(allProps) {
   console.log('📡 Fetching contacts from HubSpot…');
 
-  // HubSpot allows max-100 properties per call
+  // chunk properties (HubSpot max 100 per request)
   const propChunks = [];
   for (let i = 0; i < allProps.length; i += 100) {
     propChunks.push(allProps.slice(i, i + 100).map(p => p.name));
   }
 
-  let after = undefined;
   const lastSync = await getLastSyncTimestamp();
-  const now      = Date.now();
-  const contacts = {};
+  const contacts = {};       // id → merged record
+  let after;
 
   do {
-    for (const props of propChunks) {
+    let nextAfter;
+    for (let idx = 0; idx < propChunks.length; idx++) {
       const params = {
-        limit:      100,
+        limit:100,
         after,
-        properties: props
+        properties: propChunks[idx]
       };
-
       if (lastSync) {
         params.filterGroups = [{
-          filters: [{
-            propertyName: 'hs_lastmodifieddate',
-            operator:     'GT',
-            value:        lastSync.toString()
-          }]
+          filters:[{ propertyName:'hs_lastmodifieddate', operator:'GT', value:lastSync.toString() }]
         }];
       }
-
       const { data } = await hubspot.get('', { params });
 
-      data.results.forEach(c => {
-        // Merge chunks for the same contact ID
-        contacts[c.id] = { id: c.id, ...(contacts[c.id] || {}), ...c.properties };
-      });
+      // keep paging cursor only from the *first* chunk
+      if (idx === 0) nextAfter = data.paging?.next?.after;
 
-      // use paging info only from the first chunk
-      if (!after) after = data.paging?.next?.after;
+      data.results.forEach(c => {
+        contacts[c.id] = { id:c.id, ...(contacts[c.id]||{}), ...c.properties };
+      });
     }
+    after = nextAfter;
   } while (after);
 
   console.log(`✅ Finished fetching ${Object.keys(contacts).length} contacts`);
-  await saveLastSyncTimestamp(now);
+  await saveLastSyncTimestamp(Date.now());
   return Object.values(contacts);
 }
 
+/* ─────────────────── table creator/extender */
 async function ensureTable(schemaFields) {
   const ds    = bigquery.dataset(process.env.BQ_DATASET);
   const table = ds.table(process.env.BQ_TABLE);
   const [exists] = await table.exists();
+
   if (!exists) {
-    await ds.createTable(process.env.BQ_TABLE, { schema:{fields:schemaFields} });
+    await ds.createTable(process.env.BQ_TABLE, { schema:{ fields:schemaFields } });
     return table;
   }
-  // If table exists, expand schema with any new columns
+
   const [meta] = await table.getMetadata();
   const present = new Set(meta.schema.fields.map(f => f.name));
-  const toAdd   = schemaFields.filter(f => !present.has(f.name));
-  if (toAdd.length) {
-    meta.schema.fields.push(...toAdd);
-    await table.setMetadata({schema:meta.schema});
+  const add     = schemaFields.filter(f => !present.has(f.name));
+  if (add.length) {
+    meta.schema.fields.push(...add);
+    await table.setMetadata({ schema: meta.schema });
   }
   return table;
 }
 
+/* ─────────────────── main */
 (async () => {
   try {
-    /* 1 ─ property catalogue & schema */
+    // 1. schema
     const hubProps = await getAllPropertyMetadata();
-
     const schema = [
-      {name:'id', type:'STRING', mode:'REQUIRED'},
-      ...hubProps.map(p => ({
-        name : sanitise(p.name),
-        type : hubTypeToBq(p.type),
-        mode : 'NULLABLE'
-      }))
+      { name:'id', type:'STRING', mode:'REQUIRED' },
+      ...hubProps.map(p => ({ name:sanitise(p.name), type:hubTypeToBq(p.type), mode:'NULLABLE' }))
     ];
 
-    /* 2 ─ fetch contacts changed since last sync */
-    const contacts  = await fetchContacts(hubProps);
+    // 2. data
+    const contacts = await fetchContacts(hubProps);
+    const map      = Object.fromEntries(hubProps.map(p => [p.name, sanitise(p.name)]));
 
-    /* 3 ─ map contact keys to sanitised column names */
-    const propMap = Object.fromEntries(hubProps.map(p => [p.name, sanitise(p.name)]));
     const rows = contacts.map(c => {
-      const obj = { id: c.id };
-      for (const [k,v] of Object.entries(c)) {
-        if (k === 'id') continue;
-        obj[propMap[k]] = v ?? null;
-      }
-      return obj;
+      const r = { id:c.id };
+      for (const [k,v] of Object.entries(c)) if (k !== 'id') r[ map[k] ] = v ?? null;
+      return r;
     });
 
-    /* 4 ─ ensure table & upload */
+    // 3. load
     const table = await ensureTable(schema);
-    if (rows.length) await table.insert(rows, {ignoreUnknownValues:true, skipInvalidRows:true});
+    if (rows.length) await table.insert(rows, { ignoreUnknownValues:true, skipInvalidRows:true });
 
-    /* 5 ─ record sync */
-    await saveLastSyncTimestamp(Date.now());
-    
     console.log(`✅ Uploaded ${rows.length} rows across ${schema.length} columns`);
-  } catch (e) {
-    console.error('❌ ETL failed:', e);
+  } catch (err) {
+    console.error('❌ ETL failed:', err);
     process.exit(1);
   }
 })();
-
