@@ -1,4 +1,4 @@
-# HubSpot → BigQuery ETL
+# HubSpot → BigQuery ELT
 
 **Sync your HubSpot contacts into BigQuery with true upserts, incremental fetches, dynamic schema evolution, and nightly cleanup of deleted records.**
 
@@ -19,10 +19,10 @@
 1. **Node.js v18+**
 2. **Google Cloud Service Account** with BigQuery Data Editor rights.  
 3. **HubSpot Private App Token** (CRM `contacts` scope).  
-4. A BigQuery dataset (e.g. `Thrive_HubSpot`) containing `sync_tracker`:
+4. A BigQuery dataset (e.g. `HubSpot_Contacts`) containing `sync_tracker`:
 
    ```sql
-   CREATE TABLE IF NOT EXISTS `PROJECT.Thrive_HubSpot.sync_tracker` (
+   CREATE TABLE IF NOT EXISTS `PROJECT.HubSpot_Contacts.sync_tracker` (
      entity STRING,
      last_sync_timestamp TIMESTAMP
    );
@@ -40,7 +40,7 @@
 3. **Add GitHub Secrets** in Settings → Secrets:
    - `GCP_KEY` (service account JSON)
    - `BQ_PROJECT_ID`
-   - `BQ_DATASET` (`Thrive_HubSpot`)
+   - `BQ_DATASET` (`HubSpot_Contacts`)
    - `HUBSPOT_TOKEN`
 
 ---
@@ -48,8 +48,8 @@
 ## Local Testing
 
 ```bash
-# Run the ETL locally (reads .env)
-npm run etl
+# Run the ELT locally (reads .env)
+npm run ELT
 ```
 
 You should see logs like:
@@ -63,19 +63,19 @@ You should see logs like:
 
 ## GitHub Actions
 
-### 1. Hourly ETL (`.github/workflows/etl.yml`)
+### 1. Hourly ELT (`.github/workflows/ELT.yml`)
 
 Runs every hour to sync new/updated contacts:
 
 ```yaml
-name: Hourly HubSpot ETL
+name: Hourly HubSpot ELT
 on:
   schedule:
     - cron: '0 * * * *'  # hourly
   workflow_dispatch:
 
 jobs:
-  run-etl:
+  run-ELT:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -84,7 +84,7 @@ jobs:
       - run: npm install
       - uses: google-github-actions/auth@v1
         with: { credentials_json: ${{ secrets.GCP_KEY }} }
-      - name: Run ETL
+      - name: Run ELT
         env:
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
           BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
@@ -127,7 +127,7 @@ jobs:
 
 - **Query** the `Contacts` table in BigQuery.  
 - Numeric properties (like `hs_analytics_num_page_views`, `hs_email_open`) are stored as `FLOAT`.  
-- For best performance, schedule your Looker Studio data source refresh to align with the ETL runs.
+- For best performance, schedule your Looker Studio data source refresh to align with the ELT runs.
 
 ---
 
