@@ -1,24 +1,25 @@
 # HubSpot → BigQuery ETL
 
-This ETL syncs your HubSpot `contacts` into BigQuery every hour, performing true upserts so that any updated properties (including numeric fields like `hs_analytics_num_page_views` and `hs_email_open`) are reflected without duplicates.
+**Sync your HubSpot contacts into BigQuery with true upserts, incremental fetches, dynamic schema evolution, and nightly cleanup of deleted records.**
 
 ---
 
 ## Features
 
-- **Dynamic schema**: Automatically adds new HubSpot properties as BigQuery columns.
-- **Incremental fetch**: Only fetches contacts modified since the last run.
-- **True upsert**: Uses a staging table + `MERGE` to update existing rows and insert new ones.
-- **Error-tolerant batching**: Streams data in batches and logs partial failures without aborting the entire load.
+- **Dynamic Schema**: Automatically adds new HubSpot contact properties as BigQuery columns.
+- **Incremental Fetch**: Pulls only contacts changed since the last run, using `hs_lastmodifieddate`.
+- **True Upsert**: Uses a staging table and `MERGE` to update existing rows, insert new ones, and (optionally) delete removed contacts.
+- **Error-Tolerant Batching**: Streams in 200-row batches for inserts and logs row-level errors without aborting.
+- **Nightly Cleanup**: Removes contacts in BigQuery that have been deleted or merged in HubSpot.
 
 ---
 
 ## Prerequisites
 
 1. **Node.js v18+**
-2. **Google Cloud service account** with BigQuery Data Editor rights.
-3. **HubSpot private app token** with CRM `contacts` scope.
-4. A BigQuery dataset (`Thrive_HubSpot`) with an existing `sync_tracker` table:
+2. **Google Cloud Service Account** with BigQuery Data Editor rights.  
+3. **HubSpot Private App Token** (CRM `contacts` scope).  
+4. A BigQuery dataset (e.g. `Thrive_HubSpot`) containing `sync_tracker`:
 
    ```sql
    CREATE TABLE IF NOT EXISTS `PROJECT.Thrive_HubSpot.sync_tracker` (
@@ -32,11 +33,11 @@ This ETL syncs your HubSpot `contacts` into BigQuery every hour, performing true
 ## Setup
 
 1. **Clone this repo**
-2. **Install dependencies**
+2. **Install dependencies**:
    ```bash
    npm install
    ```
-3. **Add repository secrets** in GitHub Settings → Secrets:
+3. **Add GitHub Secrets** in Settings → Secrets:
    - `GCP_KEY` (service account JSON)
    - `BQ_PROJECT_ID`
    - `BQ_DATASET` (`Thrive_HubSpot`)
@@ -47,22 +48,30 @@ This ETL syncs your HubSpot `contacts` into BigQuery every hour, performing true
 ## Local Testing
 
 ```bash
-# Load environment variables from your .env file
+# Run the ETL locally (reads .env)
 npm run etl
 ```
 
-You should see logs indicating how many contacts were fetched and upserted.
+You should see logs like:
+
+```
+📡 Fetching contacts…
+⚡️ Uploaded 7213 contacts across 389 columns
+```
 
 ---
 
 ## GitHub Actions
 
-The workflow `etl.yml` is configured to run hourly:
+### 1. Hourly ETL (`.github/workflows/etl.yml`)
+
+Runs every hour to sync new/updated contacts:
 
 ```yaml
+name: Hourly HubSpot ETL
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 * * * *'  # hourly
   workflow_dispatch:
 
 jobs:
@@ -71,33 +80,59 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
-        with:
-          node-version: 18
+        with: { node-version: 18 }
       - run: npm install
       - uses: google-github-actions/auth@v1
-        with:
-          credentials_json: ${{ secrets.GCP_KEY }}
-      - run: npm run etl
+        with: { credentials_json: ${{ secrets.GCP_KEY }} }
+      - name: Run ETL
         env:
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
           BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
           BQ_DATASET:    ${{ secrets.BQ_DATASET }}
+        run: node index.js
+```
+
+### 2. Nightly Cleanup (`.github/workflows/cleanup.yml`)
+
+Runs once a night at 2 AM to remove deleted HubSpot contacts from BigQuery:
+
+```yaml
+name: Nightly HubSpot Cleanup
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with: { node-version: 18 }
+      - run: npm install
+      - uses: google-github-actions/auth@v1
+        with: { credentials_json: ${{ secrets.GCP_KEY }} }
+      - name: Remove deleted contacts
+        env:
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET:    ${{ secrets.BQ_DATASET }}
+        run: node cleanup.js
 ```
 
 ---
 
-## Querying in Looker Studio
+## Looker Studio / Reports
 
-- Use the `Contacts` table in your BigQuery dataset.
-- Numeric properties (e.g. `hs_analytics_num_page_views`) are stored as `FLOAT` and will display zero correctly.
-- Schedule a BigQuery source refresh in Looker Studio to match the ETL schedule.
+- **Query** the `Contacts` table in BigQuery.  
+- Numeric properties (like `hs_analytics_num_page_views`, `hs_email_open`) are stored as `FLOAT`.  
+- For best performance, schedule your Looker Studio data source refresh to align with the ETL runs.
 
 ---
 
 ## Troubleshooting
 
-1. **413 Request Too Large**: Adjust batch size in `streamToStage` (default is 200).  
-2. **Missing column errors**: Ensure your HubSpot app has access to all properties and they appear in `getProps()`.
-
----
-
+- **413 Request Too Large**: Lower `batchSize` in `streamToStage` (default is 200).  
+- **Missing columns**: Confirm your HubSpot token has access to all required properties.  
+- **Cleanup failures**: Ensure `cleanup.js` can fetch all live IDs and that the BigQuery table names match your secrets.
