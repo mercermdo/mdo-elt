@@ -1,4 +1,4 @@
-name: Nightly HubSpot Deletes → BigQuery
+name: Nightly HubSpot Deletes to BigQuery
 
 on:
   schedule:
