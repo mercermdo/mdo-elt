@@ -27,10 +27,7 @@ async function getProps() {
   do {
     const { data } = await axios.get(
       'https://api.hubapi.com/crm/v3/properties/contacts',
-      {
-        headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` },
-        params: { limit: 100, after, archived: false }
-      }
+      { headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }, params: { limit: 100, after, archived: false } }
     );
     props = props.concat(data.results);
     after = data.paging?.next?.after;
@@ -67,15 +64,13 @@ async function saveSync(ts) {
 
 /* ---------- fetch changed contacts ---------------------------------- */
 async function fetchContacts(props) {
-  const params = {
-    limit: 100,
-    properties: props.map(p => p.name).join(',')
-  };
+  const params = { limit: 100, properties: props.map(p => p.name).join(',') };
   const out = {};
   const since = await lastSync();
-  const now   = Date.now();
-  // filter on last modified
+  const now = Date.now();
+
   params.filterGroups = [{ filters: [{ propertyName: 'hs_lastmodifieddate', operator: 'GT', value: since.toString() }] }];
+
   let after;
   do {
     params.after = after;
@@ -83,6 +78,7 @@ async function fetchContacts(props) {
     data.results.forEach(c => out[c.id] = { id: c.id, ...(out[c.id] || {}), ...c.properties });
     after = data.paging?.next?.after;
   } while (after);
+
   await saveSync(now);
   return Object.values(out);
 }
@@ -98,7 +94,7 @@ async function ensureTable(tableName, schema) {
   }
   const [meta] = await tb.getMetadata();
   const have = new Set(meta.schema.fields.map(f => f.name));
-  const add  = schema.filter(f => !have.has(f.name));
+  const add = schema.filter(f => !have.has(f.name));
   if (add.length) {
     meta.schema.fields.push(...add);
     await tb.setMetadata({ schema: meta.schema });
@@ -106,26 +102,36 @@ async function ensureTable(tableName, schema) {
   return tb;
 }
 
-/* ---------- batch-insert into staging -------------------------------- */
+/* ---------- batch-insert into staging with retry/errors ------------ */
 async function streamToStage(rows, schema) {
   const stage = await ensureTable('Contacts_stage', schema);
-  // recreate stage table each run
   await stage.delete({ ignoreNotFound: true });
   await stage.create({ schema: { fields: schema } });
+
   const batchSize = 50;
   for (let i = 0; i < rows.length; i += batchSize) {
     const slice = rows.slice(i, i + batchSize).map(r => ({ insertId: r.id, json: r }));
-    await stage.insert(slice, { ignoreUnknownValues: true, skipInvalidRows: true });
+    try {
+      await stage.insert(slice, { ignoreUnknownValues: true, skipInvalidRows: true });
+    } catch (e) {
+      if (e.name === 'PartialFailureError' && e.errors?.length) {
+        console.warn('⚠️  stage batch errors (first 3):');
+        e.errors.slice(0, 3).forEach(err => {
+          console.warn(err.errors, 'row:', JSON.stringify(err.row).slice(0,200));
+        });
+      } else {
+        throw e;
+      }
+    }
   }
 }
 
 /* ---------- merge stage → master ------------------------------------ */
 async function mergeStageIntoMaster(schema) {
-  const cols    = schema.map(f => `\`${f.name}\``).join(', ');
-  const updates = schema
-    .filter(f => f.name !== 'id')
-    .map(f => `T.\`${f.name}\` = S.\`${f.name}\``)
-    .join(', ');
+  const cols = schema.map(f => `\`${f.name}\``).join(', ');
+  const updates = schema.filter(f => f.name !== 'id')
+    .map(f => `T.\`${f.name}\` = S.\`${f.name}\``).join(', ');
+
   const sql = `
     MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.Contacts\` T
     USING \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.Contacts_stage\` S
@@ -133,6 +139,7 @@ async function mergeStageIntoMaster(schema) {
     WHEN MATCHED THEN UPDATE SET ${updates}
     WHEN NOT MATCHED THEN INSERT (${cols}) VALUES (${cols});
   `;
+
   await bq.query({ query: sql });
 }
 
@@ -148,26 +155,20 @@ async function mergeStageIntoMaster(schema) {
     const propMap = Object.fromEntries(props.map(p => [p.name, sanitise(p.name)]));
 
     const contacts = await fetchContacts(props);
-    if (!contacts.length) {
-      console.log('ℹ️ No new / changed contacts');
-      return;
-    }
+    if (!contacts.length) return console.log('ℹ️ No changes');
 
-    // build rows with correct types
     const rows = contacts.map(c => {
       const r = { id: c.id };
       for (const [k, v] of Object.entries(c)) {
         if (k === 'id') continue;
         const col = propMap[k];
-        if (v === '' || v == null) {
-          r[col] = null;
-          continue;
-        }
+        if (v === '' || v == null) { r[col] = null; continue; }
         switch (typeMap[k]) {
-          case 'number':
-            const num = parseFloat(v);
-            r[col] = isNaN(num) ? null : num;
+          case 'number': {
+            const n = parseFloat(v.toString().replace(/[^\d.-]/g,''));
+            r[col] = isNaN(n) ? null : n;
             break;
+          }
           case 'bool':
             r[col] = (v === 'true' || v === true);
             break;
@@ -181,7 +182,7 @@ async function mergeStageIntoMaster(schema) {
     await streamToStage(rows, schema);
     await mergeStageIntoMaster(schema);
 
-    console.log(`✅ Upserted ${rows.length} contacts into Contacts`);
+    console.log(`✅ Upserted ${rows.length} contacts`);
   } catch (e) {
     console.error('❌ ETL failed:', e);
     process.exit(1);
