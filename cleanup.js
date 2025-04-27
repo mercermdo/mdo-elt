@@ -1,34 +1,53 @@
-name: Nightly HubSpot Deletes → BigQuery
+// cleanup.js  — remove deleted HubSpot contacts from BigQuery
 
-on:
-  schedule:
-    - cron: '0 2 * * *'      # every night at 2am
-  workflow_dispatch:        # allow manual runs too
+require('dotenv').config();
+const axios = require('axios');
+const { BigQuery } = require('@google-cloud/bigquery');
 
-jobs:
-  cleanup:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+// HubSpot client\const hubspot = axios.create({
+  baseURL: 'https://api.hubapi.com/crm/v3/objects/contacts',
+  headers: { Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}` }
+});
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
+// BigQuery client\const bq = new BigQuery({ projectId: process.env.BQ_PROJECT_ID });
 
-      - name: Install dependencies
-        run: npm install
+(async () => {
+  try {
+    console.log('⏳ Fetching live HubSpot contact IDs…');
+    // 1. Retrieve all existing contact IDs from HubSpot
+    let allIds = [];
+    let after;
+    do {
+      const { data } = await hubspot.get('', { params: { limit: 100, after } });
+      allIds.push(...data.results.map(c => c.id));
+      after = data.paging?.next?.after;
+    } while (after);
 
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v1
-        with:
-          credentials_json: ${{ secrets.GCP_KEY }}
+    console.log(`✅ Retrieved ${allIds.length} live contact IDs`);
 
-      - name: Remove deleted contacts
-        run: node cleanup.js
-        env:
-          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
-          BQ_PROJECT_ID:  ${{ secrets.BQ_PROJECT_ID }}
-          BQ_DATASET:     ${{ secrets.BQ_DATASET }}
-          BQ_TABLE:       ${{ secrets.BQ_TABLE }}
+    // 2. Delete rows in BigQuery where id is not in live HubSpot IDs
+    if (allIds.length === 0) {
+      console.warn('⚠️ No live IDs found, skipping delete');
+      return;
+    }
+
+    // Parameterize list
+    const placeholders = allIds.map(() => '?').join(', ');
+    const deleteSql = `
+      DELETE FROM \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.Contacts\`
+      WHERE id NOT IN (${placeholders})
+    `;
+
+    console.log('⏳ Deleting removed contacts from BigQuery…');
+    const [job] = await bq.createQueryJob({
+      query: deleteSql,
+      params: allIds
+    });
+    const [result] = await job.getQueryResults();
+
+    console.log(`✅ Deleted ${job.statistic.query.dmlStats.deletedRowCount || 0} contacts from BigQuery`);
+  } catch (err) {
+    console.error('❌ Cleanup failed:', err);
+    process.exit(1);
+  }
+})();
