@@ -134,6 +134,7 @@ async function streamToStage(rows, schema) {
 }
 
 /* ---------- merge stage → master ------------------------------------ */
+/* ---------- merge stage → master ------------------------------------ */
 async function mergeStageIntoMaster(schema) {
   const cols = schema.map(f => `\`${f.name}\``).join(', ');
   const updates = schema
@@ -144,12 +145,17 @@ async function mergeStageIntoMaster(schema) {
     MERGE \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.Contacts\` T
     USING \`${process.env.BQ_PROJECT_ID}.${process.env.BQ_DATASET}.Contacts_stage\` S
     ON T.id = S.id
-    WHEN MATCHED THEN UPDATE SET ${updates}
-    WHEN NOT MATCHED THEN INSERT (${cols}) VALUES (${cols});
+    WHEN MATCHED THEN
+      UPDATE SET ${updates}
+    WHEN NOT MATCHED THEN
+      INSERT (${cols}) VALUES (${cols})
+    WHEN NOT MATCHED BY SOURCE THEN
+      DELETE;
   `;
 
   await bq.query({ query: sql });
 }
+
 
 /* ---------- main ----------------------------------------------------- */
 (async () => {
