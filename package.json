@@ -1,34 +1,19 @@
 {
-  "name": "mdo-etl",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-
-{
   "name": "mdo-elt",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "dev": "node index.js",
-    "elt": "NODE_ENV=production node index.js > /dev/null 2>&1"
+    "elt": "NODE_ENV=production node index.js > /dev/null 2>&1",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  
-  "dependencies": {
-    "axios": "^1.6.7",
-    "dotenv": "^16.0.3",
-    "@google-cloud/bigquery": "^7.11.0"
-  }
-}
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
-    "@google-cloud/bigquery": "^7.9.4",
     "axios": "^1.9.0",
-    "dotenv": "^16.5.0"
+    "dotenv": "^16.5.0",
+    "@google-cloud/bigquery": "^7.9.4"
   }
 }
