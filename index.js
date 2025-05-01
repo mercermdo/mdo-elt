@@ -173,6 +173,7 @@ async function mergeStageIntoMaster(schema) {
       for (const [k, v] of Object.entries(c)) {
         if (k === 'id') continue;
         const col = propMap[k];
+        const type = typeMap[k];
 
         // null/empty-string ➔ NULL
         if (v === '' || v == null) {
@@ -180,16 +181,31 @@ async function mergeStageIntoMaster(schema) {
           continue;
         }
 
-        switch (typeMap[k]) {
+        // Optional: force dynamic fields like hs_email_optout_* to string
+        if (/^hs_email_optout_\d+$/.test(k)) {
+          r[col] = String(v);
+          continue;
+        }
+
+        switch (type) {
           case 'number': {
             // strip any non-digit (e.g. “$”, “,”) then parse
             const n = parseFloat(v.toString().replace(/[^\d.-]/g, ''));
             r[col] = isNaN(n) ? null : n;
             break;
           }
-          case 'bool':
-            r[col] = (v === 'true' || v === true);
+          case 'bool': {
+            // safer coercion
+            if (v === true || v === false) {
+              r[col] = v;
+            } else if (typeof v === 'string') {
+              const lower = v.toLowerCase();
+              r[col] = lower === 'true' ? true : lower === 'false' ? false : null;
+            } else {
+              r[col] = null;
+            }
             break;
+          }
           default:
             r[col] = v;
         }
