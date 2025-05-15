@@ -171,10 +171,9 @@ async function mergeStageIntoMaster(schema) {
 
     // 🧠 Ensure both stage and master tables have updated schema
     const stageTable = await ensureTable('Contacts_stage', rawSchema);
-    await ensureTable('Contacts', rawSchema); // ✅ Add this line
+    await ensureTable('Contacts', rawSchema);
 
-    const [meta] = await stageTable.getMetadata();
-    const schema = meta.schema.fields;
+    const schema = rawSchema;
 
     const typeMap = Object.fromEntries(props.map(p => [p.name, p.type]));
     const propMap = Object.fromEntries(props.map(p => [p.name, sanitise(p.name)]));
