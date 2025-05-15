@@ -169,60 +169,20 @@ async function mergeStageIntoMaster(schema) {
       ...props.map(p => ({ name: sanitise(p.name), type: hub2bq(p.type), mode: 'NULLABLE' }))
     ];
 
-    // 🧠 Make sure table has the schema before building maps
+    // 🧠 Ensure both stage and master tables have updated schema
     const stageTable = await ensureTable('Contacts_stage', rawSchema);
+    await ensureTable('Contacts', rawSchema); // ✅ Add this line
+
     const [meta] = await stageTable.getMetadata();
     const schema = meta.schema.fields;
 
-    // Rebuild type and prop maps based on final schema (for safety)
     const typeMap = Object.fromEntries(props.map(p => [p.name, p.type]));
     const propMap = Object.fromEntries(props.map(p => [p.name, sanitise(p.name)]));
 
     const contacts = await fetchContacts(props);
     if (!contacts.length) return console.log('ℹ️ No changes');
 
-    const rows = contacts.map(c => {
-      const r = { id: c.id };
-      for (const [k, v] of Object.entries(c)) {
-        if (k === 'id') continue;
-        const col = propMap[k];
-        const type = typeMap[k];
-
-        if (!col) continue; // 💥 Prevents mismatch if HubSpot returned an unexpected field
-
-        if (v === '' || v == null) {
-          r[col] = null;
-          continue;
-        }
-
-        if (/^hs_email_optout_\d+$/.test(k)) {
-          r[col] = String(v);
-          continue;
-        }
-
-        switch (type) {
-          case 'number': {
-            const n = parseFloat(v.toString().replace(/[^\d.-]/g, ''));
-            r[col] = isNaN(n) ? null : n;
-            break;
-          }
-          case 'bool': {
-            if (v === true || v === false) {
-              r[col] = v;
-            } else if (typeof v === 'string') {
-              const lower = v.toLowerCase();
-              r[col] = lower === 'true' ? true : lower === 'false' ? false : null;
-            } else {
-              r[col] = null;
-            }
-            break;
-          }
-          default:
-            r[col] = v;
-        }
-      }
-      return r;
-    });
+    const rows = contacts.map(/* ... */); // no change needed below here
 
     await streamToStage(rows, schema);
     await mergeStageIntoMaster(schema);
