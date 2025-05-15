@@ -181,7 +181,49 @@ async function mergeStageIntoMaster(schema) {
     const contacts = await fetchContacts(props);
     if (!contacts.length) return console.log('ℹ️ No changes');
 
-    const rows = contacts.map(/* ... */); // no change needed below here
+    const rows = contacts.map(c => {
+  const r = { id: c.id };
+  for (const [k, v] of Object.entries(c)) {
+    if (k === 'id') continue;
+    const col = propMap[k];
+    const type = typeMap[k];
+
+    if (!col) continue; // Prevent mismatch if HubSpot returned an unknown field
+
+    if (v === '' || v == null) {
+      r[col] = null;
+      continue;
+    }
+
+    if (/^hs_email_optout_\d+$/.test(k)) {
+      r[col] = String(v);
+      continue;
+    }
+
+    switch (type) {
+      case 'number': {
+        const n = parseFloat(v.toString().replace(/[^\d.-]/g, ''));
+        r[col] = isNaN(n) ? null : n;
+        break;
+      }
+      case 'bool': {
+        if (v === true || v === false) {
+          r[col] = v;
+        } else if (typeof v === 'string') {
+          const lower = v.toLowerCase();
+          r[col] = lower === 'true' ? true : lower === 'false' ? false : null;
+        } else {
+          r[col] = null;
+        }
+        break;
+      }
+      default:
+        r[col] = v;
+    }
+  }
+  return r;
+});
+
 
     await streamToStage(rows, schema);
     await mergeStageIntoMaster(schema);
