@@ -95,19 +95,25 @@ async function ensureTable(tableName, schema) {
   const ds = bq.dataset(process.env.BQ_DATASET);
   const tb = ds.table(tableName);
   const [exists] = await tb.exists();
+
   if (!exists) {
     const [table] = await ds.createTable(tableName, { schema: { fields: schema } });
     return table;
   }
+
   const [meta] = await tb.getMetadata();
   const have = new Set(meta.schema.fields.map(f => f.name));
   const add = schema.filter(f => !have.has(f.name));
+
   if (add.length) {
+    console.log(`🛠️ Adding new fields to schema: ${add.map(f => f.name).join(', ')}`);
     meta.schema.fields.push(...add);
     await tb.setMetadata({ schema: meta.schema });
   }
+
   return tb;
 }
+
 
 /* ---------- batch-insert into staging with retry/errors ------------ */
 async function streamToStage(rows, schema) {
@@ -158,10 +164,17 @@ async function mergeStageIntoMaster(schema) {
 (async () => {
   try {
     const props = await getProps();
-    const schema = [
+    const rawSchema = [
       { name: 'id', type: 'STRING', mode: 'REQUIRED' },
       ...props.map(p => ({ name: sanitise(p.name), type: hub2bq(p.type), mode: 'NULLABLE' }))
     ];
+
+    // 🧠 Make sure table has the schema before building maps
+    const stageTable = await ensureTable('Contacts_stage', rawSchema);
+    const [meta] = await stageTable.getMetadata();
+    const schema = meta.schema.fields;
+
+    // Rebuild type and prop maps based on final schema (for safety)
     const typeMap = Object.fromEntries(props.map(p => [p.name, p.type]));
     const propMap = Object.fromEntries(props.map(p => [p.name, sanitise(p.name)]));
 
@@ -175,13 +188,13 @@ async function mergeStageIntoMaster(schema) {
         const col = propMap[k];
         const type = typeMap[k];
 
-        // null/empty-string ➔ NULL
+        if (!col) continue; // 💥 Prevents mismatch if HubSpot returned an unexpected field
+
         if (v === '' || v == null) {
           r[col] = null;
           continue;
         }
 
-        // Optional: force dynamic fields like hs_email_optout_* to string
         if (/^hs_email_optout_\d+$/.test(k)) {
           r[col] = String(v);
           continue;
@@ -189,13 +202,11 @@ async function mergeStageIntoMaster(schema) {
 
         switch (type) {
           case 'number': {
-            // strip any non-digit (e.g. “$”, “,”) then parse
             const n = parseFloat(v.toString().replace(/[^\d.-]/g, ''));
             r[col] = isNaN(n) ? null : n;
             break;
           }
           case 'bool': {
-            // safer coercion
             if (v === true || v === false) {
               r[col] = v;
             } else if (typeof v === 'string') {
